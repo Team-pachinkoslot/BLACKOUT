@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GRID LAB v2 | Linux Cyber Range</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #090f1c; color: #e4edf8; font: 15px/1.6 system-ui, sans-serif; }
+    header { background: #101c30; border-bottom: 1px solid #29415e; padding: 17px max(20px, calc((100vw - 1350px)/2)); display: flex; justify-content: space-between; gap: 15px; align-items: center; }
+    h1 { margin: 0; color: #65e6bd; font-size: 23px; }
+    h2 { margin: 0 0 12px; font-size: 18px; }
+    small, .muted { color: #93a8c4; }
+    .wrap { max-width: 1350px; margin: auto; padding: 22px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+    button, select { background: #203653; border: 1px solid #426283; border-radius: 8px; color: white; padding: 10px 13px; cursor: pointer; }
+    button:hover, button.active { background: #176c79; border-color: #5bdfcf; }
+    .layout { display: grid; grid-template-columns: minmax(310px, 0.9fr) minmax(400px, 1.5fr); gap: 18px; }
+    .panel { background: #121f33; border: 1px solid #2a405d; border-radius: 12px; padding: 18px; margin-bottom: 17px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .metrics div { background: #0a1729; border-radius: 8px; padding: 12px; }
+    .metrics strong { display: block; color: #69e6c0; font-size: 19px; }
+    .stage { padding: 12px; border: 1px solid #314965; border-radius: 9px; margin: 8px 0; cursor: pointer; }
+    .stage:hover, .stage.selected { border-color: #67dec5; background: #19354a; }
+    .stage.locked { opacity: 0.45; cursor: not-allowed; }
+    .stage.done { border-left: 4px solid #e5c16a; }
+    .stage-title { font-weight: 700; }
+    .terminal { height: 390px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #030910; color: #b6f6ce; border: 1px solid #203b43; border-radius: 8px; padding: 15px; font: 14px/1.65 Consolas, 'Courier New', monospace; }
+    .command { display: flex; gap: 8px; margin-top: 10px; }
+    input { min-width: 0; flex: 1; border: 1px solid #395979; border-radius: 7px; padding: 12px; background: #071524; color: #e5f6ff; font: 14px Consolas, monospace; }
+    .flag-form { display: flex; gap: 8px; }
+    .log { background: #071524; padding: 12px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.7 Consolas, monospace; }
+    .tag { color: #f0c86c; }
+    .notice { border-left: 3px solid #62dbc5; padding-left: 12px; }
+    @media (max-width: 850px) { .layout { grid-template-columns: 1fr; } header { display: block; } }
+    @media (max-width: 500px) { .metrics { grid-template-columns: 1fr; } .flag-form { flex-wrap: wrap; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚡ GRID LAB <small>/ LINUX CYBER RANGE v2</small></h1>
+    <small>● OFFLINE SIMULATION | 架空の変電所・外部通信なし</small>
+  </header>
+  <main class="wrap">
+    <div class="toolbar">
+      <button id="attackTab" onclick="switchMode('attack')">RED TEAM / 攻撃者</button>
+      <button id="defendTab" onclick="switchMode('defend')">BLUE TEAM / 防御者</button>
+      <button onclick="resetStage()">現在のステージを初期化</button>
+      <button onclick="resetAll()">全進捗をリセット</button>
+    </div>
+    <div class="layout">
+      <section>
+        <div class="panel">
+          <h2>変電所ステータス（模擬値）</h2>
+          <div class="metrics">
+            <div>母線電圧<strong>66.0 kV</strong></div>
+            <div>周波数<strong>50.0 Hz</strong></div>
+            <div>設備状態<strong id="status">正常</strong></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 id="missionTitle">ミッション</h2>
+          <p class="muted" id="progress"></p>
+          <div id="stageList"></div>
+        </div>
+        <div class="panel">
+          <h2 id="stageHeading">ステージ</h2>
+          <p id="story"></p>
+          <p class="notice" id="objective"></p>
+          <button onclick="showHint()">ヒントを見る（減点なし）</button>
+          <p class="muted" id="hint"></p>
+        </div>
+      </section>
+      <section>
+        <div class="panel">
+          <h2>仮想Linuxターミナル</h2>
+          <p class="muted">コマンド履歴: ↑ / ↓　|　最初は <code>help</code> を入力</p>
+          <div id="terminal" class="terminal" role="log" aria-live="polite"></div>
+          <form class="command" onsubmit="runCommand(event)">
+            <input id="cmd" autocomplete="off" spellcheck="false" aria-label="Linuxコマンド" placeholder="例: ls -la /var/log">
+            <button type="submit">実行</button>
+          </form>
+        </div>
+        <div class="panel">
+          <h2>FLAG提出</h2>
+          <form class="flag-form" onsubmit="submitFlag(event)">
+            <input id="flag" autocomplete="off" placeholder="FLAG{...}" aria-label="FLAG">
+            <button type="submit">提出する</button>
+          </form>
+          <p id="flagResult" class="tag"></p>
+        </div>
+        <div class="panel">
+          <h2>セキュリティイベント</h2>
+          <div id="logs" class="log"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <script>
+    // すべて架空のローカルデータ。OSコマンドやネットワーク通信は実行しない。
+    const $ = id => document.getElementById(id);
+    const scenarios = {
+      attack: [
+        { title: '01 初期偵察', story: '演習用Linux端末にログインした。運用担当者が残した設備台帳を探そう。', objective: '台帳から最初のFLAGを見つける。', hint: 'pwd → ls -la → find /home -name *.txt → cat', flag: 'FLAG{inventory_found}', files: { '/home/trainee/readme.txt': '設備台帳は /opt/grid/inventory.txt を参照。', '/opt/grid/inventory.txt': 'SUBSTATION LAB / ASSET INVENTORY\nconsole: 10.10.0.10 (SIMULATED)\nhistorian: 10.10.0.20 (SIMULATED)\nFLAG{inventory_found}' } },
+        { title: '02 サービス調査', story: '架空の監査ログにWeb管理画面の設定情報が記録されている。', objective: 'サービスの監査記録を調べ、FLAGを見つける。', hint: 'ls /var/log → cat /var/log/services.log → grep FLAG /var/log/services.log', flag: 'FLAG{service_audit}', files: { '/var/log/services.log': '2026-11-04 INFO web-console tcp/443 open\n2026-11-04 WARN legacy-config detected\n2026-11-04 INFO audit-token FLAG{service_audit}', '/etc/grid/services.conf': 'web-console=enabled\nhistorian=enabled\nmode=simulation' } },
+        { title: '03 設定ファイル解析', story: '監査用の設定ファイルが複数存在する。対象の設定ミスを特定しよう。', objective: '設定ファイル内の監査FLAGを発見する。', hint: 'find /etc -name *.conf → grep -n audit /etc/grid/access.conf', flag: 'FLAG{least_privilege}', files: { '/etc/grid/access.conf': '# simulated configuration\nrole=operator\naudit_note=FLAG{least_privilege}\nrecommendation=restrict unnecessary privileges', '/etc/grid/services.conf': 'mode=simulation\naccess=review_required' } },
+        { title: '04 ログの相関分析', story: '短時間に大量の認証試行が発生した。イベントの発生元を調べる。', objective: '認証ログから不審な送信元に関するFLAGを発見する。', hint: 'grep FAILED /var/log/auth.log → grep 10.10.0.99 /var/log/auth.log', flag: 'FLAG{auth_anomaly}', files: { '/var/log/auth.log': '09:01 ACCEPT 10.10.0.15 user=operator\n09:02 FAILED 10.10.0.99 user=admin\n09:02 FAILED 10.10.0.99 user=admin\n09:03 FAILED 10.10.0.99 user=admin\n09:04 INVESTIGATION 10.10.0.99 FLAG{auth_anomaly}' } },
+        { title: '05 最終監査報告', story: 'これまでの調査結果がレポートに集約されている。', objective: '最終監査レポートからFLAGを取得する。', hint: 'find /opt -name *.txt → cat /opt/grid/final-report.txt', flag: 'FLAG{red_team_complete}', files: { '/opt/grid/final-report.txt': 'GRID LAB FINAL AUDIT\nFinding: insufficient access restrictions\nFinding: unusual login attempts\nRecommendation: MFA / least privilege / monitoring\nFLAG{red_team_complete}' } }
+      ],
+      defend: [
+        { title: '01 ログの初動確認', story: 'SOCに認証失敗のアラートが届いた。ログを確認する。', objective: 'アラートに対応するFLAGを見つける。', hint: 'ls /var/log → cat /var/log/alerts.log', flag: 'FLAG{alert_triage}', files: { '/var/log/alerts.log': '09:04 WARN failed logins from 10.10.0.99\n09:05 CASE opened FLAG{alert_triage}' } },
+        { title: '02 送信元の特定', story: '複数の通信記録から、疑わしい送信元を特定しよう。', objective: '通信ログ内のFLAGを見つける。', hint: 'grep WARN /var/log/network.log', flag: 'FLAG{source_identified}', files: { '/var/log/network.log': '09:01 INFO 10.10.0.15 accepted\n09:02 WARN 10.10.0.99 repeated auth attempts\n09:03 WARN 10.10.0.99 case=FLAG{source_identified}' } },
+        { title: '03 権限設定の点検', story: '不適切なアクセス権限がないか設定を点検する。', objective: '権限監査のFLAGを発見する。', hint: 'cat /etc/grid/permissions.conf', flag: 'FLAG{permission_review}', files: { '/etc/grid/permissions.conf': 'role=operator\naccess=read-only\nreview=FLAG{permission_review}\nrecommendation=least privilege' } },
+        { title: '04 インシデント対応', story: '封じ込めの判断に必要な証跡を集める。', objective: '対応記録からFLAGを取得する。', hint: 'find /opt -name *.txt → cat /opt/grid/incident.txt', flag: 'FLAG{containment_plan}', files: { '/opt/grid/incident.txt': 'INCIDENT PLAN\n1. Preserve evidence\n2. Confirm affected accounts\n3. Apply simulated block\n4. Monitor alerts\nFLAG{containment_plan}' } },
+        { title: '05 復旧後レビュー', story: '監視が安定した。最後に復旧後レビューを確認する。', objective: 'レビュー記録から最終FLAGを見つける。', hint: 'cat /opt/grid/recovery.txt', flag: 'FLAG{blue_team_complete}', files: { '/opt/grid/recovery.txt': 'POST-INCIDENT REVIEW\nMFA: recommended\nLog retention: enabled\nAlert tuning: completed\nFLAG{blue_team_complete}' } }
+      ]
+    };
+
+    let current = 'attack';
+    let selected = { attack: 0, defend: 0 };
+    let completed = { attack: 0, defend: 0 };
+    let cwd = '/home/trainee';
+    let history = [];
+    let historyIndex = 0;
+
+    function filesForStage() {
+      return {
+        '/home/trainee/welcome.txt': 'GRID LAB / Linux training terminal\nRead the mission and investigate files.\nUse help for supported commands.',
+        '/etc/hostname': 'gridlab-sim',
+        '/etc/os-release': 'NAME="GRID LAB Virtual Linux"\nVERSION="2.0"',
+        ...scenarios[current][selected[current]].files
+      };
+    }
+
+    function normalize(path) {
+      const parts = (path.startsWith('/') ? path : cwd + '/' + path).split('/');
+      const stack = [];
+      for (const part of parts) {
+        if (!part || part === '.') continue;
+        if (part === '..') stack.pop();
+        else stack.push(part);
+      }
+      return '/' + stack.join('/');
+    }
+
+    function isDirectory(path, files) {
+      if (path === '/') return true;
+      return Object.keys(files).some(file => file.startsWith(path + '/'));
+    }
+
+    function print(message = '') {
+      $('terminal').textContent += message + '\n';
+      $('terminal').scrollTop = $('terminal').scrollHeight;
+    }
+
+    function render() {
+      const stages = scenarios[current];
+      $('missionTitle').textContent = current === 'attack' ? 'RED TEAM ミッション' : 'BLUE TEAM ミッション';
+      $('progress').textContent = `クリア ${completed[current]}/5 | 全体 ${completed.attack + completed.defend}/10`;
+      $('stageList').innerHTML = stages.map((s, i) => {
+        const locked = i > completed[current];
+        const cls = [ 'stage', locked ? 'locked' : '', i === selected[current] ? 'selected' : '', i < completed[current] ? 'done' : '' ].join(' ');
+        return `<div class="${cls}" data-index="${i}" role="button" tabindex="${locked ? -1 : 0}" aria-disabled="${locked}"><span class="stage-title">${i < completed[current] ? '✓' : locked ? '🔒' : '▶'} ${s.title}</span></div>`;
+      }).join('');
+      document.querySelectorAll('.stage:not(.locked)').forEach(element => {
+        const choose = () => selectStage(Number(element.dataset.index));
+        element.addEventListener('click', choose);
+        element.addEventListener('keydown', e => { if (e.key === 'Enter') choose(); });
+      });
+      const stage = stages[selected[current]];
+      $('stageHeading').textContent = stage.title;
+      $('story').textContent = stage.story;
+      $('objective').textContent = stage.objective;
+      $('hint').textContent = '';
+      $('flagResult').textContent = '';
+      $('status').textContent = completed.defend === 5 ? '監視強化済' : '正常';
+      $('attackTab').classList.toggle('active', current === 'attack');
+      $('defendTab').classList.toggle('active', current === 'defend');
+      $('logs').textContent = '[09:00] INFO  monitoring started\n[09:02] INFO  sensor status normal\n[09:04] WARN  simulated authentication anomaly\n[09:05] INFO  investigation exercise ready';
+    }
+
+    function boot() {
+      cwd = '/home/trainee';
+      history = [];
+      historyIndex = 0;
+      $('terminal').textContent = '';
+      print('GRID LAB Virtual Linux 2.0 (simulation)');
+      print('trainee@gridlab:~$  コマンドを入力してください。help で一覧を表示。');
+      $('cmd').focus();
+    }
+
+    function selectStage(index) {
+      if (index > completed[current]) return;
+      selected[current] = index;
+      render();
+      boot();
+    }
+
+    function switchMode(mode) {
+      current = mode;
+      render();
+      boot();
+    }
+
+    function showHint() {
+      $('hint').textContent = scenarios[current][selected[current]].hint;
+    }
+
+    function resetStage() {
+      render();
+      boot();
+    }
+
+    function resetAll() {
+      if (!confirm('すべてのクリア状況をリセットしますか？')) return;
+      completed = { attack: 0, defend: 0 };
+      selected = { attack: 0, defend: 0 };
+      render();
+      boot();
+    }
+
+    function runCommand(event) {
+      event.preventDefault();
+      const command = $('cmd').value.trim();
+      $('cmd').value = '';
+      if (!command) return;
+      history.push(command);
+      historyIndex = history.length;
+      print(`trainee@gridlab:${cwd}$ ${command}`);
+      const files = filesForStage();
+      const tokens = command.match(/"[^"]*"|'[^']*'|\S+/g)?.map(t => t.replace(/^['"]|['"]$/g, '')) || [];
+      const [cmd, ...args] = tokens;
+      const positional = args.filter(arg => !arg.startsWith('-'));
+      const target = normalize(positional[0] || '.');
+
+      if (cmd === 'clear') { $('terminal').textContent = ''; return; }
+      if (cmd === 'help') {
+        print('SUPPORTED COMMANDS\nhelp, clear, pwd, whoami, hostname, id, uname, date\nls [-la] [path], cd [path], cat <file>, head <file>, tail <file>\ngrep [-n] <pattern> <file>, find <path> -name <pattern>\nwc <file>, echo <text>, history, sudo <command>\n※コマンドは教育用の簡易再現。実Linuxとは一部動作が異なります。');
+      } else if (cmd === 'pwd') {
+        print(cwd);
+      } else if (cmd === 'whoami') {
+        print('trainee');
+      } else if (cmd === 'hostname') {
+        print('gridlab-sim');
+      } else if (cmd === 'id') {
+        print('uid=1000(trainee) gid=1000(trainee) groups=1000(trainee)');
+      } else if (cmd === 'uname') {
+        print('Linux gridlab-sim 6.1.0-virtual x86_64');
+      } else if (cmd === 'date') {
+        print(new Date().toString());
+      } else if (cmd === 'history') {
+        print(history.map((entry, i) => `${i + 1}  ${entry}`).join('\n'));
+      } else if (cmd === 'sudo') {
+        print('sudo: この演習では管理者権限を使用できません。');
+      } else if (cmd === 'echo') {
+        print(args.join(' '));
+      } else if (cmd === 'cd') {
+        const path = normalize(positional[0] || '/home/trainee');
+        if (isDirectory(path, files)) cwd = path;
+        else print(`cd: ${positional[0]}: No such directory`);
+      } else if (cmd === 'ls') {
+        if (!isDirectory(target, files)) {
+          print(`ls: cannot access '${positional[0] || '.'}': No such directory`);
+        } else {
+          const entries = new Map();
+          for (const file of Object.keys(files)) {
+            if (!file.startsWith(target === '/' ? '/' : target + '/')) continue;
+            const rest = file.slice(target === '/' ? 1 : target.length + 1);
+            const name = rest.split('/')[0];
+            entries.set(name, rest.includes('/') ? 'd' : '-');
+          }
+          const long = args.some(arg => arg.includes('l') && arg.startsWith('-'));
+          print([...entries].map(([name, type]) => long ? `${type}rw-r--r-- 1 trainee trainee  ${name}` : name).join('\n') || '(empty)');
+        }
+      } else if (['cat', 'head', 'tail', 'wc'].includes(cmd)) {
+        const path = normalize(positional[0] || '');
+        if (!Object.hasOwn(files, path)) {
+          print(`${cmd}: ${positional[0] || ''}: No such file`);
+        } else {
+          const lines = files[path].split('\n');
+          if (cmd === 'cat') print(files[path]);
+          if (cmd === 'head') print(lines.slice(0, 10).join('\n'));
+          if (cmd === 'tail') print(lines.slice(-10).join('\n'));
+          if (cmd === 'wc') print(`${lines.length} ${files[path].split(/\s+/).length} ${files[path].length} ${positional[0]}`);
+        }
+      } else if (cmd === 'grep') {
+        const numbered = args.includes('-n');
+        const pattern = positional[0];
+        const file = positional[1];
+        if (!pattern || !file) print('usage: grep [-n] <pattern> <file>');
+        else if (!Object.hasOwn(files, normalize(file))) print(`grep: ${file}: No such file`);
+        else {
+          const lines = files[normalize(file)].split('\n');
+          print(lines.map((line, i) => line.includes(pattern) ? (numbered ? `${i + 1}:` : '') + line : null).filter(x => x !== null).join('\n'));
+        }
+      } else if (cmd === 'find') {
+        const root = normalize(args[0] || '.');
+        const nameIndex = args.indexOf('-name');
+        const pattern = nameIndex >= 0 ? args[nameIndex + 1] : '*';
+        if (!isDirectory(root, files)) print(`find: '${args[0]}': No such directory`);
+        else {
+          const regex = new RegExp('^' + (pattern || '*').replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
+          print(Object.keys(files).filter(path => path.startsWith(root === '/' ? '/' : root + '/') && regex.test(path.split('/').pop())).join('\n'));
+        }
+      } else {
+        print(`${cmd}: command not found (help で使用可能コマンドを確認)`);
+      }
+    }
+
+    function submitFlag(event) {
+      event.preventDefault();
+      const answer = $('flag').value.trim();
+      const stage = scenarios[current][selected[current]];
+      if (answer !== stage.flag) {
+        $('flagResult').textContent = '✗ FLAGが違います。ファイルをもう一度調査してください。';
+        return;
+      }
+      $('flag').value = '';
+      $('flagResult').textContent = '✓ 正解！';
+      if (selected[current] === completed[current]) completed[current]++;
+      const next = selected[current] + 1;
+      if (next < scenarios[current].length) {
+        selectStage(next);
+        print('✓ 前のステージをクリアしました。次のステージへ進みます。');
+      } else {
+        render();
+        $('flagResult').textContent = `🎉 ${current === 'attack' ? 'RED TEAM' : 'BLUE TEAM'} 全5ステージクリア！`;
+      }
+    }
+
+    $('cmd').addEventListener('keydown', event => {
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        historyIndex = Math.max(0, historyIndex - 1);
+        $('cmd').value = history[historyIndex] || '';
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        historyIndex = Math.min(history.length, historyIndex + 1);
+        $('cmd').value = history[historyIndex] || '';
+      }
+    });
+
+    switchMode('attack');
+  </script>
+</body>
+</html>
